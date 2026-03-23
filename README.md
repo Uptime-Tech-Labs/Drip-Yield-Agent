@@ -4,14 +4,10 @@ AI agent that spends **only yield** from staked wstETH while **principal stays**
 
 ## What it does
 
-On the default path (TypeScript agent, no Base spending vault required):
-
 1. Yield accrues on mainnet wstETH in `MainnetYieldVault`.
 2. The agent draws **yield only** to its Ethereum EOA (whitelisted).
 3. Funds move to Base as USDC via **Across** (preferred: one bundle — wstETH → Base USDC with `anyToBridgeable`) **or** Uniswap wstETH→USDC on Ethereum then Across USDC→Base.
-4. The agent pays the x402 game with **USDC on Base**.
-
-Optional: deploy `BaseSpendingVault` for owner-funded caps on Base instead of holding USDC in the agent EOA.
+4. The agent pays the x402 game with **USDC on Base** (held in the agent EOA after bridging).
 
 ## The Synthesis (hackathon)
 
@@ -21,7 +17,7 @@ Integration with [The Synthesis](https://synthesis.md/skill.md) uses Mastra memo
 |------|------|
 | Register | Fill `SYNTHESIS_*` in `.env` (see `.env.example`). Tools: `synthesis-registration-advance` → email OTP or social → `POST /register/complete`. Credentials: `.synthesis-credentials`; metadata: `.synthesis-registration.json`. |
 | API | `synthesis-auth-status`, `synthesis-api-request` → `https://synthesis.devfolio.co` |
-| Submit / publish | [Submission skill](https://synthesis.devfolio.co/submission/skill.md): public GitHub repo, set `SYNTHESIS_PROJECT_REPO_URL`, then `npm run synthesis:submit` or tool `synthesis-submission-advance` (draft → self-custody → publish; admin + all members self-custody). |
+| Submit / publish | [Submission skill](https://synthesis.devfolio.co/submission/skill.md): public GitHub repo, set `SYNTHESIS_PROJECT_REPO_URL`, then `npm run synthesis:submit` or tool `synthesis-submission-advance` (draft → self-custody → publish; admin + all members self-custody). If transfer fails with *owner address in use*, set `SYNTHESIS_SELF_CUSTODY_ADDRESS` to a **new** EOA that no other Synthesis participant uses. |
 
 `npm run dev` prints a short Synthesis block, runs registration advance once (again if `SYNTHESIS_EMAIL_OTP` is set), then the LLM pipeline. Game HTTP: **undici** by default; set `GAME_USE_NODE_FETCH=1` for Node fetch. `DRIPAGENT_SKIP_PLAY=1` skips `play-game`.
 
@@ -33,11 +29,6 @@ Integration with [The Synthesis](https://synthesis.md/skill.md) uses Mastra memo
 4. If you used Uniswap in step 3, bridge **USDC (Ethereum) → USDC (Base)** (`acrossBridgeClient.ts`). If you used Across wstETH→Base USDC in step 3, skip this.
 5. Agent pays the game via x402 with USDC on Base.
 
-## Optional: Base spending vault
-
-1. After bridging, owner funds `BaseSpendingVault` instead of keeping USDC in the agent EOA.
-2. Agent `draw`s from the vault to game recipients. Tighter spend controls than a bare EOA.
-
 ## Contracts
 
 ### `MainnetYieldVault.sol` (Ethereum mainnet)
@@ -46,13 +37,6 @@ Integration with [The Synthesis](https://synthesis.md/skill.md) uses Mastra memo
 - Agent: `drawYield(amount, recipient)` only
 - Enforces `recipientWhitelist`, `maxDrawPerTx`, yield-only limits
 - Owner: config + `withdrawAll()`
-
-### `BaseSpendingVault.sol` (Base)
-
-- Spending token (recommended: USDC)
-- Agent: `draw(amount, recipient)` only
-- Enforces whitelist, `maxDrawPerTx`, balance
-- Owner: `ownerWithdraw(amount)`
 
 ## Prerequisites
 
@@ -71,23 +55,15 @@ npm install
 
 ### 2) Configure `.env`
 
-Example for two-contract deploy:
+Mainnet vault deploy (example):
 
 ```bash
-# Mainnet vault
 MAINNET_WSTETH_ADDRESS=0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0
 MAINNET_AGENT_ADDRESS=0xYourAgentAddress
 MAINNET_MAX_DRAW_PER_TX=10000000000000000
-
-# Base spending vault
-BASE_SPEND_TOKEN_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
-BASE_AGENT_ADDRESS=0xYourAgentAddress
-BASE_MAX_DRAW_PER_TX=100000
-BASE_GAME_PAYMENT_ADDRESS=0xGamePaymentRecipient
 ```
 
-- `MAINNET_MAX_DRAW_PER_TX`: wstETH wei (18 decimals).
-- `BASE_MAX_DRAW_PER_TX`: token units (USDC: 6 decimals).
+`MAINNET_MAX_DRAW_PER_TX` is in wstETH wei (18 decimals). Add `BASE_RPC_URL`, `AGENT_PRIVATE_KEY`, `AGENT_WALLET_ADDRESS`, and game settings per `.env.example`.
 
 ### 3) Deploy `MainnetYieldVault`
 
@@ -100,20 +76,7 @@ forge script script/DeployMainnetYieldVault.s.sol \
 
 Set `MAINNET_VAULT_ADDRESS` from the output.
 
-### 4) Deploy `BaseSpendingVault` (Base)
-
-```bash
-forge script script/DeployBaseSpendingVault.s.sol \
-  --rpc-url $BASE_RPC_URL \
-  --private-key $OWNER_PRIVATE_KEY \
-  --broadcast
-```
-
-Set `BASE_SPENDING_VAULT_ADDRESS`.
-
-### 5) Whitelists and caps
-
-Mainnet:
+### 4) Whitelist and caps (mainnet)
 
 ```bash
 cast send $MAINNET_VAULT_ADDRESS \
@@ -121,15 +84,9 @@ cast send $MAINNET_VAULT_ADDRESS \
   --rpc-url $MAINNET_RPC_URL --private-key $OWNER_PRIVATE_KEY
 ```
 
-Base:
+Use the address that should receive yield draws (often the agent EOA or a bridge-facing recipient).
 
-```bash
-cast send $BASE_SPENDING_VAULT_ADDRESS \
-  "setRecipientWhitelist(address,bool)" $GAME_PAYMENT_ADDRESS true \
-  --rpc-url $BASE_RPC_URL --private-key $OWNER_PRIVATE_KEY
-```
-
-### 6) Deposit principal (mainnet)
+### 5) Deposit principal (mainnet)
 
 ```bash
 cast send $MAINNET_WSTETH_ADDRESS \
@@ -141,23 +98,9 @@ cast send $MAINNET_VAULT_ADDRESS \
   --rpc-url $MAINNET_RPC_URL --private-key $OWNER_PRIVATE_KEY
 ```
 
-### 7) Bridge yield and fund Base vault (if using spending vault)
+### 6) Run the agent
 
-1. Draw yield from mainnet vault to bridge recipient.
-2. Bridge to Base (USDC).
-3. Fund vault:
-
-```bash
-cast send $BASE_SPEND_TOKEN_ADDRESS \
-  "approve(address,uint256)" $BASE_SPENDING_VAULT_ADDRESS $AMOUNT \
-  --rpc-url $BASE_RPC_URL --private-key $OWNER_PRIVATE_KEY
-
-cast send $BASE_SPENDING_VAULT_ADDRESS \
-  "fund(uint256)" $AMOUNT \
-  --rpc-url $BASE_RPC_URL --private-key $OWNER_PRIVATE_KEY
-```
-
-### 8) Run the agent
+Bridge USDC to the agent’s Base address as needed, then:
 
 ```bash
 npm run dev
@@ -173,7 +116,7 @@ curl -X POST https://play.0000402.xyz/play \
   -d '{}'
 ```
 
-Use the `PAYMENT-REQUIRED` response to set recipient/token details before whitelisting.
+Use the `PAYMENT-REQUIRED` response to configure the x402 payee and token for the agent.
 
 ## Security
 

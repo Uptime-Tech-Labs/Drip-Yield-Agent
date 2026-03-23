@@ -228,6 +228,8 @@ export type SubmissionAdvanceResult =
   | { phase: "create_failed"; status: number; detail: string }
   | { phase: "transfer_init_failed"; status: number; detail: string }
   | { phase: "transfer_confirm_failed"; status: number; detail: string }
+  /** Target wallet is already the on-chain owner for a different Synthesis participant — pick another EOA. */
+  | { phase: "transfer_owner_address_in_use"; detail: string }
   | { phase: "publish_failed"; status: number; detail: string }
   | { phase: "publish_forbidden"; detail: string }
   | { phase: "complete"; projectUuid: string; status: string; slug?: string };
@@ -320,6 +322,9 @@ export async function advanceSynthesisSubmission(opts?: {
       JSON.stringify({ targetOwnerAddress: target })
     );
     if (!init.ok) {
+      if (init.status === 409 && /Another participant already uses this owner address/i.test(init.text)) {
+        return { phase: "transfer_owner_address_in_use", detail: init.text };
+      }
       if (init.status === 409 && /self.custody|already/i.test(init.text)) {
         /* already transferred — continue to publish */
       } else {
@@ -340,6 +345,9 @@ export async function advanceSynthesisSubmission(opts?: {
         })
       );
       if (!confirm.ok) {
+        if (confirm.status === 409 && /Another participant already uses this owner address/i.test(confirm.text)) {
+          return { phase: "transfer_owner_address_in_use", detail: confirm.text };
+        }
         return { phase: "transfer_confirm_failed", status: confirm.status, detail: confirm.text };
       }
     }
@@ -388,6 +396,11 @@ export function describeSubmissionNextStep(r: SubmissionAdvanceResult): string {
       return "Self-custody transfer init failed.";
     case "transfer_confirm_failed":
       return "Self-custody transfer confirm failed.";
+    case "transfer_owner_address_in_use":
+      return (
+        "That wallet is already Synthesis owner for another participant. " +
+        "Set SYNTHESIS_SELF_CUSTODY_ADDRESS to a fresh 0x address (not used by any other agent registration), then run again."
+      );
     case "publish_failed":
       return "Publish failed — all members must be self-custody; must be team admin.";
     case "publish_forbidden":

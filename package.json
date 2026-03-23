@@ -1,0 +1,28 @@
+{
+    "name": "dripagent",
+    "version": "1.0.0",
+    "description": "A drip agent",
+    "main": "dist/index.js",
+    "scripts": {
+        "dev": "tsx src/agent.ts",
+        "synthesis:submit": "tsx src/synthesisSubmissionCli.ts",
+        "build": "tsc",
+        "start": "node dist/agent.js"
+    },
+    "dependencies": {
+        "@ai-sdk/openai": "^1.0.0",
+        "@mastra/core": "^1.14.0",
+        "@mastra/libsql": "^1.7.1",
+        "@mastra/memory": "^1.9.0",
+        "@x402/evm": "^2.7.0",
+        "@x402/fetch": "^2.7.0",
+        "dotenv": "^17.3.1",
+        "undici": "^6.13.0",
+        "viem": "^2.47.5"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "tsx": "^4.0.0",
+        "typescript": "^5.0.0"
+    }
+}

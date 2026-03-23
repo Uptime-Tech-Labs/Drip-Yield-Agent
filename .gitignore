@@ -1,0 +1,16 @@
+node_modules/
+.env
+dist/
+out/
+cache/
+broadcast/
+
+# Mastra / LibSQL
+data/*.db
+data/*.db-*
+
+# Synthesis — never commit API keys (see https://synthesis.md/skill.md)
+.synthesis-credentials
+.synthesis-registration.json
+.synthesis-pending.json
+.synthesis-project.json
